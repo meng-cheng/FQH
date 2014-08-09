@@ -1,5 +1,5 @@
 # Diagonalizing FQH in LLL on a torus. Both single layer & double layer
-# Optimization using bitarray
+# Optimization using bitwise operations
 
 import itertools
 import numpy as np
@@ -7,7 +7,14 @@ import scipy as sp
 import scipy.sparse.linalg as lin
 import pylab
 from bit import *
-        
+
+def config2bits(config):
+    return sum([1L << n for n in config])
+
+def bits2config(n, Ns):
+# Ns is the number of orbitals
+    return [bit_get(n, i) for i in range(Ns)]
+
 def getBasis0(Ns, N):
 # No momentum conservation
     states = [tuple(sorted(list(x))) for x in itertools.combinations(range(Ns), N)]
@@ -19,7 +26,7 @@ def getBasis(Ns, N):
     sectors =  [ [] for i in range(Ns)]
     for config in itertools.combinations(range(Ns), N):
         k = sum(config)%Ns
-        sectors[k].append(config)            
+        sectors[k].append(config2bits(config))            
     return sectors
 
 def getBasisDL(Ns, N):
@@ -30,60 +37,49 @@ def getBasisDL(Ns, N):
     sectors = [ [] for i in range(Ns)]
     for config in itertools.combinations(range(2*Ns), N):
         k = sum([n//2 for n in config])%Ns
-        sectors[k].append(config)            
+        sectors[k].append(config2bits(config))            
     return sectors
     
 # The basis states are stored in a dict. Provide method for looking up
-
-def addp(state, pos):
-    state.insert(0, pos)
-    state.sort()
-
-def removep(state, pos):
-    state.remove(pos)
 
 def fermion_sign(i, j, state):
 # 0 <= i, j < Ns
     sgn = 1
     if i < j:
-        for n in state:
-            if n >= i and n < j:
-                sgn = -sgn
+        for n in range(i,j):
+            sgn = sgn*(2*bit_get(state, n) - 1)
     else:
-        for n in state:
-            if n >= j and n < i:
-                sgn = -sgn
+        for n in range(j,i):
+            sgn = sgn*(2*bit_get(state, n) - 1)
         sgn = -sgn
     return sgn
-            
 
-def hopping(i, j, bstates, btab):
+def hopping(i, j, states, btab):
 # c_i^\dag c_j, i != j
-    mat = []
-    for ind, state in enumerate(bstates):
-        if (j in state) and (not (i in state)):
-            sgn = fermion_sign(i, j, state)
-            nstate = list(state)
-            removep(nstate, j)
-            addp(nstate, i)
-            mat.append([sgn, btab[tuple(nstate)], ind])
-    return mat
+    elems = []
+    for ind, state in enumerate(states):
+        n = state
+        if bit_test(n, j) and (not bit_test(n, i)):
+            bit_toggle(n, j)
+            bit_toggle(n, i)
+            elems.append([fermion_sign(i, j, n), btab[n], ind])
+    return elems
     
-def pairhopping(i1, j1, i2, j2, bstates, btab):
+def pairhopping(i1, j1, i2, j2, states, btab):
 # c_{i1}^\dag c_{j1} c_{i2}^\dag c_{j2}
-    mat = []
-    for ind, state in enumerate(bstates):
-        nstate = list(state)
-        if (j2 in nstate) and (not (i2 in nstate)):
-            sgn = fermion_sign(i2, j2, state)
-            removep(nstate, j2)
-            addp(nstate, i2)
-            if (j1 in nstate) and (not (i1 in nstate)):
-                sgn *= fermion_sign(i1, j1, nstate)
-                removep(nstate, j1)
-                addp(nstate, i1)
-                mat.append([sgn, btab[tuple(nstate)], ind])
-    return mat
+    elems = []
+    for ind, state in enumerate(states):
+        n = state
+        if bit_test(n, j2) and (not bit_test(n, i2)):
+            sgn = fermion_sign(i2, j2, n)
+            bit_toggle(n, j2)
+            bit_toggle(n, i2)
+            if bit_test(n, j1) and (not bit_test(n, i1)):
+                sgn *= fermion_sign(i1, j1, n)
+                bit_toggle(n, j1)
+                bit_toggle(n, i1)
+                elems.append([sgn, btab[n], ind])
+    return elems
 
 def V(k, m, a, b, Ns):
 # a*b=2*pi*Ns
@@ -111,6 +107,13 @@ def fqh(Ns, N, a, numE):
 #\sum_{j=0}^{Ns-1} \sum_{k>|m|}c_{j+k}^\dag c_{j+m}^\dag c_{j+k+m}c_j
     sectors = getBasis(Ns, N)
     spec = []
+    
+    vk0 = [ V(i, 0, a, 2*np.pi*Ns/a, Ns) for i in range(Ns//2)]
+    vkm = np.zeros((Ns//2, Ns//2))
+    for m in range(1,Ns//2):
+        for n in range(m+1, Ns//2):
+            vkm[n][m] = V(n, m, a, 2*np.pi*Ns/a, Ns)
+            
     for k, sector in enumerate(sectors):
         #print "basis:", sector
         dim = len(sector)
@@ -119,18 +122,15 @@ def fqh(Ns, N, a, numE):
         #create a look-up table
         tab = {}
         for ind, state in enumerate(sector):
-            tab[tuple(state)] = ind 
+            tab[state] = ind 
         #ham = np.zeros((dim, dim))
         #hamhop = np.zeros((dim,dim))
         ham = sp.sparse.csr_matrix((dim, dim))
         hamhop = sp.sparse.csr_matrix((dim, dim))        
         #calculate the electrostatic interaction energy, m=0
         mat = []
-        vk0 = [ V(i, 0, a, 2*np.pi*Ns/a, Ns) for i in range(Ns//2)]
-        for ind, state in enumerate(sector):
-            n = [0]*Ns # configuration in layer 1
-            for p in state:
-                n[p] = 1
+        for ind, bitstate in enumerate(sector):
+            n = bits2config(bitstate, Ns)
             int_energy = 0.0
             for k in range(Ns//2):
                 for i in range(Ns):
@@ -143,10 +143,10 @@ def fqh(Ns, N, a, numE):
         #calculate the m=1,2, ..., [Ns/2] hopping term
         for m in range(1,Ns//2):
             for n in range(m+1, Ns//2):
-                vkm = V(n, m, a, 2*np.pi*Ns/a, Ns)
+                #vkm = V(n, m, a, 2*np.pi*Ns/a, Ns)
                 for i in range(2*Ns):
                     hopmat = pairhopping((i+m)%Ns, i, (i+n)%Ns, (i+n+m)%Ns, sector, tab)
-                    hamhop = vkm*sparse_mat_wrap(dim, hopmat)
+                    hamhop = vkm[n][m]*sparse_mat_wrap(dim, hopmat)
                     ham = ham + hamhop + hamhop.transpose()
         
         print "Hamiltonian constructed."
@@ -230,11 +230,11 @@ if __name__ == "__main__":
     t = 0.0
 
     #spec = fqhDL(Ns, N, a, t, numE)
-    #spec = fqh(Ns, N, a, numE)
-    #momentum = [2*np.pi*i/Ns for i in range(Ns)]
-    #levels = [[spec[j][i] for j in range(Ns)] for i in range(numE)]
-    #pylab.figure()
-    #for i in range(numE):
-    #    pylab.plot(momentum, levels[i],'ro')
+#    spec = fqh(Ns, N, a, numE)
+#    momentum = [2*np.pi*i/Ns for i in range(Ns)]
+#    levels = [[spec[j][i] for j in range(Ns)] for i in range(numE)]
+#    pylab.figure()
+#    for i in range(numE):
+#        pylab.plot(momentum, levels[i],'ro')
     
     
