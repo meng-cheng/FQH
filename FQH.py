@@ -79,18 +79,6 @@ def pairhopping(i1, j1, i2, j2, bstates, btab):
                 mat.append([sgn, btab[tuple(nstate)], ind])
     return mat
     
-def nn(i, j, bstates):
-# density-density interaction: n_i n_j
-    mat = []
-    for ind, state in enumerate(bstates):
-        ni = 0
-        nj = 0
-        if i in state:
-            ni = 1
-        if j in state:
-            nj = 1
-        mat.append([ni*nj, ind, ind])
-    return mat
 
 def V(k, m, a, b, Ns):
 # a*b=2*pi*Ns
@@ -125,6 +113,13 @@ def fqh(Ns, N, a, numE):
 #\sum_{j=0}^{Ns-1} \sum_{k>|m|}c_{j+k}^\dag c_{j+m}^\dag c_{j+k+m}c_j
     sectors = getBasis(Ns, N)
     spec = []
+    #compute matrix elements of the interaction
+    vk0 = [ V(i, 0, a, 2*np.pi*Ns/a, Ns) for i in range(Ns//2)]
+    vkm = np.zeros((Ns//2, Ns//2))
+    for m in range(1, Ns//2):
+        for n in range(m+1, Ns//2):
+            vkm[n][m] = V(n, m, a, 2*np.pi*Ns/a, Ns)
+            
     for k, sector in enumerate(sectors):
         #print "basis:", sector
         dim = len(sector)
@@ -140,7 +135,6 @@ def fqh(Ns, N, a, numE):
         hamhop = sp.sparse.csr_matrix((dim, dim))        
         #calculate the electrostatic interaction energy, m=0
         mat = []
-        vk0 = [ V(i, 0, a, 2*np.pi*Ns/a, Ns) for i in range(Ns//2)]
         for ind, state in enumerate(sector):
             n = [0]*Ns # configuration in layer 1
             for p in state:
@@ -157,10 +151,9 @@ def fqh(Ns, N, a, numE):
         #calculate the m=1,2, ..., [Ns/2] hopping term
         for m in range(1,Ns//2):
             for n in range(m+1, Ns//2):
-                vkm = V(n, m, a, 2*np.pi*Ns/a, Ns)
-                for i in range(2*Ns):
+                for i in range(Ns):
                     hopmat = pairhopping((i+m)%Ns, i, (i+n)%Ns, (i+n+m)%Ns, sector, tab)
-                    hamhop = vkm*sparse_mat_wrap(dim, hopmat)
+                    hamhop = vkm[n][m]*sparse_mat_wrap(dim, hopmat)
                     ham = ham + hamhop + hamhop.transpose()
         
         print "Hamiltonian constructed."
@@ -169,42 +162,7 @@ def fqh(Ns, N, a, numE):
         spec.append(sorted(w))
     return spec
 
-    
-def fqhDL0(Ns, N, a, t):
-# No momentum conservation
-# Ns: number of orbitals in each layer
-# N: number of electrons
-# Lx: length of the torus in x direction. Notice that Lx*Ly=2*pi*Ns
-# d: separation between the layers. Enter the Das Sarma-Zhang potential
-# t: tunneling amplitude between the layers
 
-    states = getBasis0(2*Ns, N)
-    #create a look-up table
-    tab = {}
-    for ind, state in enumerate(states):
-        tab[tuple(state)] = ind 
-    dim = len(states)
-    ham = np.zeros((dim, dim))
-    #calculate the electrostatic interaction energy, m=0
-    mat = []
-    for ind, state in enumerate(states):
-        n1 = [0]*Ns # configuration in layer 1
-        n2 = [0]*Ns # configuration in layer 2
-        for p in state:
-            if p%2 == 0:
-                n1[p//2] = 1
-            else:
-                n2[p//2] = 1
-        int_energy = 0.0
-        for k in range(Ns):
-            vk0 = V(k, 0, a, 2*np.pi*Ns/a, Ns)
-            for i in range(Ns):
-                int_energy += vk0*n1[i]*n1[(i+k)%Ns] + vk0*n2[i]*n2[(i+k)%Ns]
-        mat.append((int_energy, ind, ind))
-    ham = ham + matrixwrap(dim, mat)
-    
-    w, v = np.linalg.eig(ham)
-    print sorted(w)
         
 def fqhDL1(Ns, N, a, t):
 # double layer FQH, full diagonalization
@@ -247,7 +205,7 @@ def fqhDL1(Ns, N, a, t):
         for m in range(1,Ns//2):
             for k in range(m+1,Ns//2):
                 vk1 = V(k, 1, a, 2*np.pi*Ns/a, Ns)
-                for i in range(2*Ns):
+                for i in range(Ns):
                     hopmat = pairhopping(incDL(i, m, Ns), i, incDL(i, k, Ns), incDL(i, k+m, Ns), sector, tab)
                     hamhop = vk1*matrixwrap(dim, hopmat)
                     ham = ham + hamhop + hamhop.transpose()
@@ -260,8 +218,9 @@ def fqhDL1(Ns, N, a, t):
         
         w = np.linalg.eigvalsh(ham)
         print sorted(w)[0:5]
+
         
-def fqhDL(Ns, N, a, t, numE):
+def fqhDL(Ns, N, a, t, numE, sectors):
 # double layer FQHE, using sparse matrices
 # Ns: number of orbitals in each layer
 # N: number of electrons
@@ -269,8 +228,13 @@ def fqhDL(Ns, N, a, t, numE):
 # d: separation between the layers. Enter the Das Sarma-Zhang potential
 # t: tunneling amplitude between the layers
 
-    sectors = getBasisDL(Ns, N)
     spec = []
+    
+    vk0 = [ V(i, 0, a, 2*np.pi*Ns/a, Ns) for i in range(Ns//2)]
+    vkm = np.zeros((Ns//2, Ns//2))
+    for m in range(1, Ns//2):
+        for n in range(m+1, Ns//2):
+            vkm[n][m] = V(n, m, a, 2*np.pi*Ns/a, Ns)
     for k, sector in enumerate(sectors):
         #print "basis:", sector
         dim = len(sector)
@@ -286,7 +250,6 @@ def fqhDL(Ns, N, a, t, numE):
         hamhop = sp.sparse.csr_matrix((dim, dim))        
         #calculate the electrostatic interaction energy, m=0
         mat = []
-        vk0 = [ V(i, 0, a, 2*np.pi*Ns/a, Ns) for i in range(Ns//2)]
         for ind, state in enumerate(sector):
             n1 = [0]*Ns # configuration in layer 1
             n2 = [0]*Ns # configuration in layer 2
@@ -307,10 +270,9 @@ def fqhDL(Ns, N, a, t, numE):
         #calculate the m=1,2, ..., [Ns/2] hopping term
         for m in range(1,Ns//2):
             for n in range(m+1, Ns//2):
-                vkm = V(n, m, a, 2*np.pi*Ns/a, Ns)
                 for i in range(2*Ns):
                     hopmat = pairhopping(incDL(i, m, Ns), i, incDL(i, n, Ns), incDL(i, n+m, Ns), sector, tab)
-                    hamhop = vkm*sparse_mat_wrap(dim, hopmat)
+                    hamhop = vkm[n][m]*sparse_mat_wrap(dim, hopmat)
                     ham = ham + hamhop + hamhop.transpose()
         
         #calculate inter-layer hopping
@@ -321,26 +283,35 @@ def fqhDL(Ns, N, a, t, numE):
         
         print "Hamiltonian constructed."
         w = lin.eigsh(ham,k=numE,which="SA",maxiter=100000,return_eigenvectors=False)
-        #print sorted(w)
+        print sorted(w)
         spec.append(sorted(w))
+        return sorted(w)
+        #break
     return spec
         
-        
-                
-if __name__ == "__main__":
-    Ns = 21
-    N = 7
-    numE = 15
-    ratio = 1 # a/b = ratio. 
-    a = np.sqrt(ratio*2*np.pi*Ns)
-    t = 0.0
 
-    #spec = fqhDL(Ns, N, a, t, numE)
-    spec = fqh(Ns, N, a, numE)
+def plot_spec(spec):
     momentum = [2*np.pi*i/Ns for i in range(Ns)]
     levels = [[spec[j][i] for j in range(Ns)] for i in range(numE)]
     pylab.figure()
     for i in range(numE):
-        pylab.plot(momentum, levels[i],'ro')
+        pylab.plot(momentum, levels[i],'ro')     
+                
+if __name__ == "__main__":
+    Ns = 18
+    N = 6
+    numE = 20
+    ratio = 3 # a/b = ratio. 
+    a = np.sqrt(ratio*2*np.pi*Ns)
+    t = 0.02
+
+
+    #sectors = getBasisDL(Ns, N)
+
+    spec0 = fqh(Ns, N, a, numE)
+    
+    plot_spec(spec0)
+    #spec = fqh(Ns, N, a, numE)
+
     
     
