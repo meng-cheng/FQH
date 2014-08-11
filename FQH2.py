@@ -213,21 +213,22 @@ def fqhDL(Ns, N, a, t, numE):
         
         print "Hamiltonian constructed."
         w = lin.eigsh(ham,k=numE,which="SA",maxiter=100000,return_eigenvectors=False)
-        #print sorted(w)
+        print sorted(w)
         spec.append(sorted(w))
+        break
     return spec
         
         
                 
 if __name__ == "__main__":
-    N = 6
+    N = 10
     Ns = 3*N
-    numE = 5
+    numE = 6
     ratio = 2 # a/b = ratio. 
     a = np.sqrt(ratio*2*np.pi*Ns)
-    t = 0.0
+    t = 0.025
 
-    #spec = fqhDL(Ns, N, a, t, numE)
+    spec = fqhDL(Ns, N, a, t, numE)
     spec = fqh(Ns, N, a, numE)
     momentum = [2*np.pi*i/Ns for i in range(Ns)]
     levels = [[spec[j][i] for j in range(Ns)] for i in range(numE)]
