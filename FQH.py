@@ -121,7 +121,6 @@ def fqh(Ns, N, a, numE):
             vkm[n][m] = V(n, m, a, 2*np.pi*Ns/a, Ns)
             
     for k, sector in enumerate(sectors):
-        #print "basis:", sector
         dim = len(sector)
         print "COM momentum:", k
         print "Hilbert space dimension:", dim
@@ -129,8 +128,6 @@ def fqh(Ns, N, a, numE):
         tab = {}
         for ind, state in enumerate(sector):
             tab[tuple(state)] = ind 
-        #ham = np.zeros((dim, dim))
-        #hamhop = np.zeros((dim,dim))
         ham = sp.sparse.csr_matrix((dim, dim))
         hamhop = sp.sparse.csr_matrix((dim, dim))        
         #calculate the electrostatic interaction energy, m=0
@@ -143,6 +140,7 @@ def fqh(Ns, N, a, numE):
             for k in range(Ns//2):
                 for i in range(Ns):
                     int_energy += vk0[k]*n[i]*n[(i+k)%Ns]
+            #print "configuration:", n, int_energy
             mat.append((int_energy, ind, ind))
         ham = ham + sparse_mat_wrap(dim, mat)
         
@@ -157,7 +155,7 @@ def fqh(Ns, N, a, numE):
                     ham = ham + hamhop + hamhop.transpose()
         
         print "Hamiltonian constructed."
-        w = lin.eigsh(ham,k=numE,which="SA",maxiter=100000,return_eigenvectors=False)
+        w, v = lin.eigsh(ham,k=numE,which="SA",maxiter=100000)
         print sorted(w)
         spec.append(sorted(w))
     return spec
@@ -174,7 +172,6 @@ def fqhDL1(Ns, N, a, t):
 
     sectors = getBasisDL(Ns, N)
     for k, sector in enumerate(sectors):
-        #print "basis:", sector
         print "COM momentum:", k
         #create a look-up table
         tab = {}
@@ -217,7 +214,7 @@ def fqhDL1(Ns, N, a, t):
             ham = ham + hamhop + hamhop.transpose()
         
         w = np.linalg.eigvalsh(ham)
-        print sorted(w)[0:5]
+        print sorted(w)
 
         
 def fqhDL(Ns, N, a, t, numE, sectors):
@@ -244,8 +241,6 @@ def fqhDL(Ns, N, a, t, numE, sectors):
         tab = {}
         for ind, state in enumerate(sector):
             tab[tuple(state)] = ind 
-        #ham = np.zeros((dim, dim))
-        #hamhop = np.zeros((dim,dim))
         ham = sp.sparse.csr_matrix((dim, dim))
         hamhop = sp.sparse.csr_matrix((dim, dim))        
         #calculate the electrostatic interaction energy, m=0
@@ -264,9 +259,7 @@ def fqhDL(Ns, N, a, t, numE, sectors):
                     int_energy += vk0[k]*n1[i]*n1[(i+k)%Ns] + vk0[k]*n2[i]*n2[(i+k)%Ns]
             mat.append((int_energy, ind, ind))
         ham = ham + sparse_mat_wrap(dim, mat)
-        
-        print "Finish electrostatic interactions"
-        
+                
         #calculate the m=1,2, ..., [Ns/2] hopping term
         for m in range(1,Ns//2):
             for n in range(m+1, Ns//2):
@@ -281,7 +274,7 @@ def fqhDL(Ns, N, a, t, numE, sectors):
             hamhop = -t*sparse_mat_wrap(dim, hopmat)
             ham = ham + hamhop + hamhop.transpose()
         
-        print "Hamiltonian constructed."
+        print "Finish Hamiltonian construction."
         w = lin.eigsh(ham,k=numE,which="SA",maxiter=100000,return_eigenvectors=False)
         print sorted(w)
         spec.append(sorted(w))
@@ -289,7 +282,17 @@ def fqhDL(Ns, N, a, t, numE, sectors):
         #break
     return spec
         
-
+def density(v, Ns, states):
+    nexpt = [0]*Ns
+    for i in range(Ns):
+        for ind, basis in enumerate(states):
+            if i in basis:
+                n = 1
+            else:
+                n = 0
+            nexpt[i] += n*np.abs(v[ind])**2
+    return nexpt
+    
 def plot_spec(spec):
     momentum = [2*np.pi*i/Ns for i in range(Ns)]
     levels = [[spec[j][i] for j in range(Ns)] for i in range(numE)]
@@ -298,10 +301,10 @@ def plot_spec(spec):
         pylab.plot(momentum, levels[i],'ro')     
                 
 if __name__ == "__main__":
-    Ns = 18
-    N = 6
-    numE = 20
-    ratio = 3 # a/b = ratio. 
+    Ns = 6
+    N = 2
+    numE = 1
+    ratio = 1 # a/b = ratio. 
     a = np.sqrt(ratio*2*np.pi*Ns)
     t = 0.02
 
