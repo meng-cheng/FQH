@@ -301,9 +301,9 @@ def plot_spec(spec):
         pylab.plot(momentum, levels[i],'ro')     
                 
 if __name__ == "__main__":
-    Ns = 6
-    N = 2
-    numE = 1
+    Ns = 18
+    N = 6
+    numE = 20
     ratio = 1 # a/b = ratio. 
     a = np.sqrt(ratio*2*np.pi*Ns)
     t = 0.02
