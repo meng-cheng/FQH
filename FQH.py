@@ -39,6 +39,9 @@ def removep(state, pos):
 def fermion_sign(i, j, state):
 # 0 <= i, j < Ns
     sgn = 1
+    if i == j:
+        return sgn
+
     if i < j:
         for n in state:
             if n >= i and n < j:
@@ -52,10 +55,10 @@ def fermion_sign(i, j, state):
             
 
 def hopping(i, j, bstates, btab):
-# c_i^\dag c_j, i != j
+# c_i^\dag c_j
     mat = []
     for ind, state in enumerate(bstates):
-        if (j in state) and (not (i in state)):
+        if (j in state) and ((i == j) or (not (i in state))):
             sgn = fermion_sign(i, j, state)
             nstate = list(state)
             removep(nstate, j)
@@ -68,26 +71,62 @@ def pairhopping(i1, j1, i2, j2, bstates, btab):
     mat = []
     for ind, state in enumerate(bstates):
         nstate = list(state)
-        if (j2 in nstate) and (not (i2 in nstate)):
+        if (j2 in nstate) and ((i2 == j2) or  (not (i2 in nstate))):
             sgn = fermion_sign(i2, j2, state)
             removep(nstate, j2)
             addp(nstate, i2)
-            if (j1 in nstate) and (not (i1 in nstate)):
+            if (j1 in nstate) and ((i1 == j1) or (not (i1 in nstate))):
                 sgn *= fermion_sign(i1, j1, nstate)
                 removep(nstate, j1)
                 addp(nstate, i1)
                 mat.append([sgn, btab[tuple(nstate)], ind])
     return mat
     
-
-def V(k, m, a, b, Ns):
+def Vcob(k, m, a, b, Ns):
+# intra-layer Coulomb interaction
 # a*b=2*pi*Ns
     cutoff = 50
     v = 0
-    for nx in range(-cutoff, cutoff+1):
-        for ny in range(1,cutoff+1):
-            q = np.sqrt((2*np.pi*(Ns*nx+k)/a)**2+(2*np.pi*ny/b)**2)
-            v += 2*(1/q)*np.exp(-0.5*(q**2))*np.cos(2*np.pi*m*ny/Ns)
+    delta = 0.0001
+    for q1 in range(-cutoff, cutoff+1):
+        for nm in range(-cutoff,cutoff+1):
+            q2 = m + nm*Ns
+            qx = 2*np.pi*q1/a
+            qy = 2*np.pi*q2/b
+            q = np.sqrt(qx*qx+qy*qy+delta)
+            #if (q != 0):
+            v += 1/q*(1-q*q)*np.exp(-0.5*q*q)*np.cos(2*np.pi*q1*k/Ns)
+    return v/Ns
+
+def Vzd(k, m, a, b, Ns, d):
+# Zhang-Das Sarma potential for inter-layer Coulomb interactions
+# 1/sqrt(r^2+d^2)
+# a*b=2*pi*Ns
+    cutoff = 50
+    deltaq = 0.0001
+    v = 0
+    for q1 in range(-cutoff, cutoff+1):
+        for nm in range(-cutoff,cutoff+1):
+            q2 = m + nm*Ns
+            qx = 2*np.pi*q1/a
+            qy = 2*np.pi*q2/b
+            q = np.sqrt(qx*qx+qy*qy+deltaq)
+            v += np.exp(-d*q)/q*(1-q*q)*np.exp(-0.5*q*q)*np.cos(2*np.pi*q1*k/Ns)
+    return v/Ns
+    
+def Vp(k, m, a, b, Ns):
+# Pseudo-potential Hamiltonian for 1/3 Laughlin state
+# a*b=2*pi*Ns
+# 1-q^2, (q^4-4q^2+1)/2
+    cutoff = 50
+    v = 0
+    for q1 in range(-cutoff, cutoff+1):
+        for nm in range(-cutoff,cutoff+1):
+            q2 = m + nm*Ns
+            qx = 2*np.pi*q1/a
+            qy = 2*np.pi*q2/b
+            q = np.sqrt(qx*qx+qy*qy)
+            v += (1-q*q)*np.exp(-0.5*q*q)*np.cos(2*np.pi*q1*k/Ns)
     return v/Ns
 
 def incDL(i, n, Ns):
@@ -109,16 +148,13 @@ def sparse_mat_wrap(dim, elems):
     
 def fqh(Ns, N, a, numE):
 #V(k, m) is the pseudo-potential
-#Hamiltonian reads 
-#\sum_{j=0}^{Ns-1} \sum_{k>|m|}c_{j+k}^\dag c_{j+m}^\dag c_{j+k+m}c_j
     sectors = getBasis(Ns, N)
     spec = []
     #compute matrix elements of the interaction
-    vk0 = [ V(i, 0, a, 2*np.pi*Ns/a, Ns) for i in range(Ns//2)]
-    vkm = np.zeros((Ns//2, Ns//2))
-    for m in range(1, Ns//2):
-        for n in range(m+1, Ns//2):
-            vkm[n][m] = V(n, m, a, 2*np.pi*Ns/a, Ns)
+    vkm = np.zeros((Ns, Ns))
+    for m in range(Ns):
+        for n in range(Ns):
+            vkm[n][m] = Vcob(n, m, a, 2*np.pi*Ns/a, Ns)
             
     for k, sector in enumerate(sectors):
         dim = len(sector)
@@ -130,39 +166,54 @@ def fqh(Ns, N, a, numE):
             tab[tuple(state)] = ind 
         ham = sp.sparse.csr_matrix((dim, dim))
         hamhop = sp.sparse.csr_matrix((dim, dim))        
+        
+        
         #calculate the electrostatic interaction energy, m=0
-        mat = []
-        for ind, state in enumerate(sector):
-            n = [0]*Ns # configuration in layer 1
-            for p in state:
-                n[p] = 1
-            int_energy = 0.0
-            for k in range(Ns//2):
-                for i in range(Ns):
-                    int_energy += vk0[k]*n[i]*n[(i+k)%Ns]
-            #print "configuration:", n, int_energy
-            mat.append((int_energy, ind, ind))
-        ham = ham + sparse_mat_wrap(dim, mat)
+        #mat = []
+        #for ind, state in enumerate(sector):
+        #    n = [0]*Ns # configuration in layer 1
+        #    for p in state:
+        #        n[p] = 1
+        #    int_energy = 0.0
+        #    for k in range(Ns//2):
+        #        for i in range(Ns):
+        #            int_energy += vk0[k]*n[i]*n[(i+k)%Ns]
+        #    #print "configuration:", n, int_energy
+        #    mat.append((int_energy, ind, ind))
+        #ham = ham + sparse_mat_wrap(dim, mat)
         
-        print "Finish electrostatic interactions"
+        #print "Finish electrostatic interactions"
         
-        #calculate the m=1,2, ..., [Ns/2] hopping term
-        for m in range(1,Ns//2):
-            for n in range(m+1, Ns//2):
-                for i in range(Ns):
-                    hopmat = pairhopping((i+m)%Ns, i, (i+n)%Ns, (i+n+m)%Ns, sector, tab)
-                    hamhop = vkm[n][m]*sparse_mat_wrap(dim, hopmat)
-                    ham = ham + hamhop + hamhop.transpose()
+        #for m in range(1,Ns//2):
+        #    for n in range(m+1, Ns//2):
+        #        for i in range(Ns):
+        #            hopmat = pairhopping((i+m)%Ns, i, (i+n)%Ns, (i+n+m)%Ns, sector, tab)
+        #            hamhop = vkm[n][m]*sparse_mat_wrap(dim, hopmat)
+        #            ham = ham + hamhop + hamhop.transpose()
         
+        for n1 in range(Ns):
+            for n2 in range(Ns):
+                for n3 in range(Ns):
+                    for n4 in range(Ns):
+                        if ((n1+n2)%Ns != (n3+n4)%Ns):
+                            continue
+                        colmat = pairhopping(n1, n3, n2, n4, sector, tab)
+                        hamhop = vkm[(n1-n3)%Ns][(n1-n4)%Ns]*sparse_mat_wrap(dim, colmat)
+                        ham = ham - hamhop
+                        if (n2 == n3):
+                            colmat = hopping(n1, n4, sector, tab)
+                            hamhop = vkm[(n1-n3)%Ns][(n1-n4)%Ns]*sparse_mat_wrap(dim, colmat)
+                            ham = ham + hamhop
+                              
+                        
         print "Hamiltonian constructed."
         w, v = lin.eigsh(ham,k=numE,which="SA",maxiter=100000)
         print sorted(w)
         spec.append(sorted(w))
     return spec
 
-
         
-def fqhDL1(Ns, N, a, t):
+def fqhDLfull(Ns, N, a, t, d):
 # double layer FQH, full diagonalization
 # Ns: number of orbitals in each layer
 # N: number of electrons
@@ -170,68 +221,104 @@ def fqhDL1(Ns, N, a, t):
 # d: separation between the layers. Enter the Das Sarma-Zhang potential
 # t: tunneling amplitude between the layers
 
+    vkm = np.zeros((Ns, Ns))
+    for m in range(Ns):
+        for n in range(Ns):
+            vkm[n][m] = Vcob(n, m, a, 2*np.pi*Ns/a, Ns)
+ 
+    vzdkm = np.zeros((Ns, Ns))
+    for m in range(Ns):
+        for n in range(Ns):
+            vzdkm[n][m] = Vzd(n, m, a, 2*np.pi*Ns/a, Ns, d)   
+            
     sectors = getBasisDL(Ns, N)
     for k, sector in enumerate(sectors):
         print "COM momentum:", k
+        dim = len(sector)
+        print "Hilbert space dimension:", dim
+
         #create a look-up table
         tab = {}
         for ind, state in enumerate(sector):
             tab[tuple(state)] = ind 
-        dim = len(sector)
+
         ham = np.zeros((dim, dim))
         hamhop = np.zeros((dim,dim))      
-        #calculate the electrostatic interaction energy, m=0
-        mat = []
-        for ind, state in enumerate(sector):
-            n1 = [0]*Ns # configuration in layer 1
-            n2 = [0]*Ns # configuration in layer 2
-            for p in state:
-                if p%2 == 0:
-                    n1[p//2] = 1
-                else:
-                    n2[p//2] = 1
-            int_energy = 0.0
-            for k in range(Ns//2):
-                vk0 = V(k, 0, a, 2*np.pi*Ns/a, Ns)
-                for i in range(Ns):
-                    int_energy += vk0*n1[i]*n1[(i+k)%Ns] + vk0*n2[i]*n2[(i+k)%Ns]
-            mat.append((int_energy, ind, ind))
-        ham = ham + matrixwrap(dim, mat)
+                
+        # intra-layer Coulomb interactions
         
-        #calculate the m=1,2, ..., [Ns/2] hopping term
-        for m in range(1,Ns//2):
-            for k in range(m+1,Ns//2):
-                vk1 = V(k, 1, a, 2*np.pi*Ns/a, Ns)
-                for i in range(Ns):
-                    hopmat = pairhopping(incDL(i, m, Ns), i, incDL(i, k, Ns), incDL(i, k+m, Ns), sector, tab)
-                    hamhop = vk1*matrixwrap(dim, hopmat)
-                    ham = ham + hamhop + hamhop.transpose()
+        for n1 in range(Ns):
+            for n2 in range(Ns):
+                for n3 in range(Ns):
+                    for n4 in range(Ns):
+                        if ((n1+n2)%Ns != (n3+n4)%Ns):
+                            continue
+                        # first layer
+                        colmat = pairhopping(2*n1, 2*n3, 2*n2, 2*n4, sector, tab)
+                        hamhop = vkm[(n1-n3)%Ns][(n1-n4)%Ns]*matrixwrap(dim, colmat)
+                        ham = ham - hamhop
+                        if (n2 == n3):
+                            colmat = hopping(2*n1, 2*n4, sector, tab)
+                            hamhop = vkm[(n1-n3)%Ns][(n1-n4)%Ns]*matrixwrap(dim, colmat)
+                            ham = ham + hamhop
+                        # second layer
+                        colmat = pairhopping(2*n1+1, 2*n3+1, 2*n2+1, 2*n4+1, sector, tab)
+                        hamhop = vkm[(n1-n3)%Ns][(n1-n4)%Ns]*matrixwrap(dim, colmat)
+                        ham = ham - hamhop
+                        if (n2 == n3):
+                            colmat = hopping(2*n1+1, 2*n4+1, sector, tab)
+                            hamhop = vkm[(n1-n3)%Ns][(n1-n4)%Ns]*matrixwrap(dim, colmat)
+                            ham = ham + hamhop
         
+        # inter-layer Coulomb interactions
+        # c^\dag_{n1, 1}c^\dag_{n2, 2}c_{n3, 2}c_{n4, 1}
+        for n1 in range(Ns):
+            for n2 in range(Ns):
+                for n3 in range(Ns):
+                    for n4 in range(Ns):
+                        if ((n1+n2)%Ns != (n3+n4)%Ns):
+                            continue
+                        colmat = pairhopping(2*n1, 2*n3+1, 2*n2+1, 2*n4, sector, tab)
+                        hamhop = vzdkm[(n1-n3)%Ns][(n1-n4)%Ns]*matrixwrap(dim, colmat)
+                        ham = ham - hamhop
+                        if (n2 == n3):
+                            colmat = hopping(2*n1, 2*n4, sector, tab)
+                            hamhop = vzdkm[(n1-n3)%Ns][(n1-n4)%Ns]*matrixwrap(dim, colmat)
+                            ham = ham + hamhop
+                            
         #calculate inter-layer hopping
         for i in range(Ns):
             hopmat = hopping(2*i, 2*i+1,sector, tab)
             hamhop = -t*matrixwrap(dim, hopmat)
             ham = ham + hamhop + hamhop.transpose()
-        
+                
         w = np.linalg.eigvalsh(ham)
         print sorted(w)
-
         
-def fqhDL(Ns, N, a, t, numE, sectors):
+        
+def fqhDL(Ns, N, a, t, d, numE):
 # double layer FQHE, using sparse matrices
 # Ns: number of orbitals in each layer
 # N: number of electrons
-# Lx: length of the torus in x direction. Notice that Lx*Ly=2*pi*Ns
-# d: separation between the layers. Enter the Das Sarma-Zhang potential
+# a: length of the torus in x direction. Notice that a*b=2*pi*Ns
 # t: tunneling amplitude between the layers
+# d: separation between the layers. Enter the Das Sarma-Zhang potential
+# numE: number of eigenvalues
+
+    sectors = getBasisDL(Ns, N)
 
     spec = []
-    
-    vk0 = [ V(i, 0, a, 2*np.pi*Ns/a, Ns) for i in range(Ns//2)]
-    vkm = np.zeros((Ns//2, Ns//2))
-    for m in range(1, Ns//2):
-        for n in range(m+1, Ns//2):
-            vkm[n][m] = V(n, m, a, 2*np.pi*Ns/a, Ns)
+
+    vkm = np.zeros((Ns, Ns))
+    for m in range(Ns):
+        for n in range(Ns):
+            vkm[n][m] = Vcob(n, m, a, 2*np.pi*Ns/a, Ns)
+ 
+    vzdkm = np.zeros((Ns, Ns))
+    for m in range(Ns):
+        for n in range(Ns):
+            vzdkm[n][m] = Vzd(n, m, a, 2*np.pi*Ns/a, Ns, d)   
+        
     for k, sector in enumerate(sectors):
         #print "basis:", sector
         dim = len(sector)
@@ -243,42 +330,62 @@ def fqhDL(Ns, N, a, t, numE, sectors):
             tab[tuple(state)] = ind 
         ham = sp.sparse.csr_matrix((dim, dim))
         hamhop = sp.sparse.csr_matrix((dim, dim))        
-        #calculate the electrostatic interaction energy, m=0
-        mat = []
-        for ind, state in enumerate(sector):
-            n1 = [0]*Ns # configuration in layer 1
-            n2 = [0]*Ns # configuration in layer 2
-            for p in state:
-                if p%2 == 0:
-                    n1[p//2] = 1
-                else:
-                    n2[p//2] = 1
-            int_energy = 0.0
-            for k in range(Ns//2):
-                for i in range(Ns):
-                    int_energy += vk0[k]*n1[i]*n1[(i+k)%Ns] + vk0[k]*n2[i]*n2[(i+k)%Ns]
-            mat.append((int_energy, ind, ind))
-        ham = ham + sparse_mat_wrap(dim, mat)
-                
-        #calculate the m=1,2, ..., [Ns/2] hopping term
-        for m in range(1,Ns//2):
-            for n in range(m+1, Ns//2):
-                for i in range(2*Ns):
-                    hopmat = pairhopping(incDL(i, m, Ns), i, incDL(i, n, Ns), incDL(i, n+m, Ns), sector, tab)
-                    hamhop = vkm[n][m]*sparse_mat_wrap(dim, hopmat)
-                    ham = ham + hamhop + hamhop.transpose()
         
+        orbs = []
+        for n1 in range(Ns):
+            for n2 in range(Ns):
+                for n3 in range(Ns):
+                    for n4 in range(Ns):
+                        if ((n1+n2)%Ns == (n3+n4)%Ns):
+                            orbs.append((n1, n2, n3, n4))
+                            
+        print "Done orbitals counting for two-body interactions."
+        
+        for orb in orbs:
+            # intra-layer Coulomb interactions
+            # first layer
+            n1 = orb[0]
+            n2 = orb[1]
+            n3 = orb[2]
+            n4 = orb[3]
+            colmat = pairhopping(2*n1, 2*n3, 2*n2, 2*n4, sector, tab)
+            hamhop = vkm[(n1-n3)%Ns][(n1-n4)%Ns]*sparse_mat_wrap(dim, colmat)
+            ham = ham - hamhop
+            if (n2 == n3):
+                colmat = hopping(2*n1, 2*n4, sector, tab)
+                hamhop = vkm[(n1-n3)%Ns][(n1-n4)%Ns]*sparse_mat_wrap(dim, colmat)
+                ham = ham + hamhop
+            # second layer
+            colmat = pairhopping(2*n1+1, 2*n3+1, 2*n2+1, 2*n4+1, sector, tab)
+            hamhop = vkm[(n1-n3)%Ns][(n1-n4)%Ns]*sparse_mat_wrap(dim, colmat)
+            ham = ham - hamhop
+            if (n2 == n3):
+                colmat = hopping(2*n1+1, 2*n4+1, sector, tab)
+                hamhop = vkm[(n1-n3)%Ns][(n1-n4)%Ns]*sparse_mat_wrap(dim, colmat)
+                ham = ham + hamhop
+                
+            # inter-layer Coulomb interactions
+            # c^\dag_{n1, 1}c^\dag_{n2, 2}c_{n3, 2}c_{n4, 1} 
+            colmat = pairhopping(2*n1, 2*n3+1, 2*n2+1, 2*n4, sector, tab)
+            hamhop = vzdkm[(n1-n3)%Ns][(n1-n4)%Ns]*sparse_mat_wrap(dim, colmat)
+            ham = ham - hamhop
+            if (n2 == n3):
+                colmat = hopping(2*n1, 2*n4, sector, tab)
+                hamhop = vzdkm[(n1-n3)%Ns][(n1-n4)%Ns]*sparse_mat_wrap(dim, colmat)
+                ham = ham + hamhop
+
+                        
+                            
         #calculate inter-layer hopping
         for i in range(Ns):
-            hopmat = hopping(2*i, 2*i+1,sector, tab)
+            hopmat = hopping(2*i, 2*i+1, sector, tab)
             hamhop = -t*sparse_mat_wrap(dim, hopmat)
             ham = ham + hamhop + hamhop.transpose()
-        
+                
         print "Finish Hamiltonian construction."
         w = lin.eigsh(ham,k=numE,which="SA",maxiter=100000,return_eigenvectors=False)
         print sorted(w)
         spec.append(sorted(w))
-        return sorted(w)
         #break
     return spec
         
@@ -301,17 +408,16 @@ def plot_spec(spec):
         pylab.plot(momentum, levels[i],'ro')     
                 
 if __name__ == "__main__":
-    Ns = 18
+    Ns = 12
     N = 6
-    numE = 20
+    numE = 5
     ratio = 1 # a/b = ratio. 
     a = np.sqrt(ratio*2*np.pi*Ns)
-    t = 0.02
+    t = 1
+    d=0
 
-
-    #sectors = getBasisDL(Ns, N)
-
-    spec0 = fqh(Ns, N, a, numE)
+    spec0 = fqhDL(Ns, N, a, t, d, numE)
+    #spec0 = fqh(Ns, N, a, numE)
     
     plot_spec(spec0)
     #spec = fqh(Ns, N, a, numE)
