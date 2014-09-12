@@ -314,7 +314,7 @@ def fqhDL(Ns, N, a, t, d, numE):
     vkm = np.zeros((Ns, Ns))
     for m in range(Ns):
         for n in range(Ns):
-            vkm[n][m] = Vp(n, m, a, 2*np.pi*Ns/a, Ns)
+            vkm[n][m] = Vcob(n, m, a, 2*np.pi*Ns/a, Ns)
  
     vzdkm = np.zeros((Ns, Ns))
     for m in range(Ns):
@@ -410,16 +410,16 @@ def plot_spec(spec):
         pylab.plot(momentum, levels[i],'ro')     
                 
 if __name__ == "__main__":
-    Ns = 18
+    Ns = 9
     N = 6
     numE = 5
     ratio = 1 # a/b = ratio. 
     a = np.sqrt(ratio*2*np.pi*Ns)
-    t = 0.1
-    d=0.2
+    t = 0.0
+    d=1
 
-    #spec0 = fqhDL(Ns, N, a, t, d, numE)
-    spec0 = fqh(Ns, N, a, numE)
+    spec0 = fqhDL(Ns, N, a, t, d, numE)
+    #spec0 = fqh(Ns, N, a, numE)
     
     plot_spec(spec0)
     #spec = fqh(Ns, N, a, numE)
