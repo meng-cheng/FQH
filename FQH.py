@@ -95,7 +95,7 @@ def Vcob(k, m, a, b, Ns):
             qy = 2*np.pi*q2/b
             q = np.sqrt(qx*qx+qy*qy+delta)
             #if (q != 0):
-            v += 1/q*(1-q*q)*np.exp(-0.5*q*q)*np.cos(2*np.pi*q1*k/Ns)
+            v += 1/q*np.exp(-0.5*q*q)*np.cos(2*np.pi*q1*k/Ns)
     return v/Ns
 
 def Vzd(k, m, a, b, Ns, d):
@@ -111,7 +111,7 @@ def Vzd(k, m, a, b, Ns, d):
             qx = 2*np.pi*q1/a
             qy = 2*np.pi*q2/b
             q = np.sqrt(qx*qx+qy*qy+deltaq)
-            v += np.exp(-d*q)/q*(1-q*q)*np.exp(-0.5*q*q)*np.cos(2*np.pi*q1*k/Ns)
+            v += np.exp(-d*q)/q*np.exp(-0.5*q*q)*np.cos(2*np.pi*q1*k/Ns)
     return v/Ns
     
 def Vp(k, m, a, b, Ns):
@@ -157,6 +157,8 @@ def fqh(Ns, N, a, numE):
             vkm[n][m] = Vcob(n, m, a, 2*np.pi*Ns/a, Ns)
             
     for k, sector in enumerate(sectors):
+        if k >= Ns/3:
+            break
         dim = len(sector)
         print "COM momentum:", k
         print "Hilbert space dimension:", dim
@@ -312,7 +314,7 @@ def fqhDL(Ns, N, a, t, d, numE):
     vkm = np.zeros((Ns, Ns))
     for m in range(Ns):
         for n in range(Ns):
-            vkm[n][m] = Vcob(n, m, a, 2*np.pi*Ns/a, Ns)
+            vkm[n][m] = Vp(n, m, a, 2*np.pi*Ns/a, Ns)
  
     vzdkm = np.zeros((Ns, Ns))
     for m in range(Ns):
@@ -401,23 +403,23 @@ def density(v, Ns, states):
     return nexpt
     
 def plot_spec(spec):
-    momentum = [2*np.pi*i/Ns for i in range(Ns)]
-    levels = [[spec[j][i] for j in range(Ns)] for i in range(numE)]
+    momentum = [2*np.pi*i/Ns for i in range(Ns/3)]
+    levels = [[spec[j][i] for j in range(Ns/3)] for i in range(numE)]
     pylab.figure()
     for i in range(numE):
         pylab.plot(momentum, levels[i],'ro')     
                 
 if __name__ == "__main__":
-    Ns = 12
+    Ns = 18
     N = 6
     numE = 5
     ratio = 1 # a/b = ratio. 
     a = np.sqrt(ratio*2*np.pi*Ns)
-    t = 1
-    d=0
+    t = 0.1
+    d=0.2
 
-    spec0 = fqhDL(Ns, N, a, t, d, numE)
-    #spec0 = fqh(Ns, N, a, numE)
+    #spec0 = fqhDL(Ns, N, a, t, d, numE)
+    spec0 = fqh(Ns, N, a, numE)
     
     plot_spec(spec0)
     #spec = fqh(Ns, N, a, numE)
